@@ -7,6 +7,7 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "50mb",
     },
   },
+  devIndicators: false,
   turbopack: {
     root: __dirname,
   },

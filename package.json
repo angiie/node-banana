@@ -20,6 +20,7 @@
     "react-dom": "^19.2.0",
     "react-konva": "^19.2.1",
     "tailwindcss": "^4.1.17",
+    "undici": "^6.22.0",
     "zustand": "^5.0.9"
   },
   "devDependencies": {

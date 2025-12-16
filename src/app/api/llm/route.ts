@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import { LLMGenerateRequest, LLMGenerateResponse, LLMModelType } from "@/types";
+import { setupProxy } from "@/utils/setupProxy";
 
 export const maxDuration = 60; // 1 minute timeout
+
+setupProxy();
 
 // Map model types to actual API model IDs
 const GOOGLE_MODEL_MAP: Record<string, string> = {

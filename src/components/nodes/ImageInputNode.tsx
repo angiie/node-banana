@@ -23,8 +23,8 @@ export function ImageInputNode({ id, data, selected }: NodeProps<ImageInputNodeT
         return;
       }
 
-      if (file.size > 10 * 1024 * 1024) {
-        alert("Image too large. Maximum size is 10MB.");
+      if (file.size > 20 * 1024 * 1024) {
+        alert("Image too large. Maximum size is 20MB.");
         return;
       }
 

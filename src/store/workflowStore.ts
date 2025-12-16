@@ -73,8 +73,8 @@ interface WorkflowStore {
   regenerateNode: (nodeId: string) => Promise<void>;
   stopWorkflow: () => void;
 
-  // Save/Load
   saveWorkflow: (name?: string) => void;
+  exportWorkflowHtml: () => void;
   loadWorkflow: (workflow: WorkflowFile) => void;
   clearWorkflow: () => void;
 
@@ -873,6 +873,237 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  },
+
+  exportWorkflowHtml: () => {
+    const { nodes, edges, edgeStyle } = get();
+
+    const workflow: WorkflowFile = {
+      version: 1,
+      name: `workflow-${new Date().toISOString().slice(0, 10)}`,
+      nodes,
+      edges,
+      edgeStyle,
+    };
+
+    const json = JSON.stringify(workflow, null, 2);
+
+    const escapeHtml = (value: string) =>
+      value
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+
+    const incoming: Record<string, string[]> = {};
+    const outgoing: Record<string, string[]> = {};
+
+    edges.forEach((edge) => {
+      const sourceId = edge.source;
+      const targetId = edge.target;
+      if (!outgoing[sourceId]) {
+        outgoing[sourceId] = [];
+      }
+      if (!incoming[targetId]) {
+        incoming[targetId] = [];
+      }
+      outgoing[sourceId].push(targetId);
+      incoming[targetId].push(sourceId);
+    });
+
+    const nodeCards = nodes
+      .map((node) => {
+        const nodeId = node.id;
+        const type = node.type;
+        const safeId = escapeHtml(nodeId);
+        const safeType = escapeHtml(type);
+        const data = node.data as any;
+
+        const incomingList = (incoming[nodeId] || [])
+          .map((id) => `<span class="badge">${escapeHtml(id)}</span>`)
+          .join(" ") || '<span class="muted">None</span>';
+
+        const outgoingList = (outgoing[nodeId] || [])
+          .map((id) => `<span class="badge">${escapeHtml(id)}</span>`)
+          .join(" ") || '<span class="muted">None</span>';
+
+        let promptPreview = "";
+        if (type === "prompt" && typeof data.prompt === "string") {
+          promptPreview = escapeHtml(
+            data.prompt.length > 160 ? `${data.prompt.slice(0, 160)}...` : data.prompt
+          );
+        } else if (type === "nanoBanana" && typeof data.inputPrompt === "string" && data.inputPrompt) {
+          promptPreview = escapeHtml(
+            data.inputPrompt.length > 160 ? `${data.inputPrompt.slice(0, 160)}...` : data.inputPrompt
+          );
+        } else if (type === "llmGenerate" && typeof data.inputPrompt === "string" && data.inputPrompt) {
+          promptPreview = escapeHtml(
+            data.inputPrompt.length > 160 ? `${data.inputPrompt.slice(0, 160)}...` : data.inputPrompt
+          );
+        }
+
+        let imageUrls: string[] = [];
+        if (type === "imageInput" && typeof data.image === "string" && data.image) {
+          imageUrls.push(data.image);
+        }
+        if (type === "annotation") {
+          if (typeof data.outputImage === "string" && data.outputImage) {
+            imageUrls.push(data.outputImage);
+          } else if (typeof data.sourceImage === "string" && data.sourceImage) {
+            imageUrls.push(data.sourceImage);
+          }
+        }
+        if (type === "nanoBanana") {
+          if (Array.isArray(data.inputImages)) {
+            imageUrls = imageUrls.concat(
+              data.inputImages.filter((v: unknown) => typeof v === "string" && v)
+            );
+          }
+          if (typeof data.outputImage === "string" && data.outputImage) {
+            imageUrls.push(data.outputImage);
+          }
+        }
+        if (type === "output" && typeof data.image === "string" && data.image) {
+          imageUrls.push(data.image);
+        }
+
+        const limitedImages = imageUrls.slice(0, 4);
+        const hasMoreImages = imageUrls.length > limitedImages.length;
+
+        const imagesHtml = limitedImages.length
+          ? `<div class="images">
+  ${limitedImages
+    .map(
+      (src, index) =>
+        `<div class="image-frame">
+  <img src="${src}" alt="node image" />
+  <a href="${src}" download="node-${safeId}-${index + 1}.png" class="image-download-button">Download</a>
+</div>`
+    )
+    .join("")}
+  ${
+    hasMoreImages
+      ? `<div class="image-more">+${imageUrls.length - limitedImages.length} more</div>`
+      : ""
+  }
+</div>`
+          : "";
+
+        const metaParts: string[] = [];
+        if (type === "nanoBanana") {
+          if (data.model) {
+            metaParts.push(`Model: ${escapeHtml(String(data.model))}`);
+          }
+          if (data.aspectRatio) {
+            metaParts.push(`Aspect: ${escapeHtml(String(data.aspectRatio))}`);
+          }
+          if (data.resolution) {
+            metaParts.push(`Resolution: ${escapeHtml(String(data.resolution))}`);
+          }
+        }
+        if (type === "llmGenerate") {
+          if (data.provider) {
+            metaParts.push(`Provider: ${escapeHtml(String(data.provider))}`);
+          }
+          if (data.model) {
+            metaParts.push(`Model: ${escapeHtml(String(data.model))}`);
+          }
+        }
+        const metaLine = metaParts.length
+          ? `<div class="meta">${metaParts.join(" · ")}</div>`
+          : "";
+
+        const promptBlock = promptPreview
+          ? `<div class="prompt-block"><div class="section-title">Prompt</div><div class="prompt-text">${promptPreview}</div></div>`
+          : "";
+
+        return `<div class="node-card">
+  <div class="node-header">
+    <div class="node-type">${safeType}</div>
+    <div class="node-id">${safeId}</div>
+  </div>
+  ${metaLine}
+  ${imagesHtml}
+  <div class="connections">
+    <div><span class="section-title">Incoming</span> ${incomingList}</div>
+    <div><span class="section-title">Outgoing</span> ${outgoingList}</div>
+  </div>
+  ${promptBlock}
+</div>`;
+      })
+      .join("");
+
+    const edgeList = edges
+      .map(
+        (edge) =>
+          `<li><code>${escapeHtml(edge.source)}</code> → <code>${escapeHtml(
+            edge.target
+          )}</code></li>`
+      )
+      .join("");
+
+    const htmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>${escapeHtml(workflow.name)}</title>
+<style>
+body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #020617; color: #e5e7eb; padding: 24px; }
+h1, h2, h3 { color: #facc15; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; }
+.layout { margin-top: 24px; display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 24px; align-items: flex-start; }
+.node-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-top: 16px; }
+.node-card { background: #020617; border: 1px solid #1f2937; border-radius: 10px; padding: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.35); }
+.node-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+.node-type { font-size: 13px; font-weight: 600; text-transform: capitalize; color: #93c5fd; }
+.node-id { font-size: 11px; color: #9ca3af; }
+.meta { font-size: 11px; color: #e5e7eb; margin-bottom: 6px; }
+.connections { font-size: 11px; color: #9ca3af; display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+.badge { display: inline-flex; align-items: center; padding: 2px 6px; border-radius: 999px; background: #111827; color: #e5e7eb; font-size: 10px; margin-right: 4px; margin-top: 2px; }
+.muted { color: #4b5563; font-size: 10px; }
+.section-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: #6b7280; margin-right: 6px; }
+.images { display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: 6px; margin-top: 8px; }
+.image-frame { position: relative; background: #020617; border-radius: 6px; overflow: hidden; border: 1px solid #1f2937; padding-bottom: 4px; }
+.image-frame img { display: block; width: 100%; height: 80px; object-fit: cover; border-bottom: 1px solid #1f2937; }
+.image-download-button { display: block; width: calc(100% - 8px); margin: 4px auto 2px; text-align: center; font-size: 10px; padding: 3px 0; border-radius: 999px; border: 1px solid #1f2937; background: #0b1120; color: #e5e7eb; text-decoration: none; cursor: pointer; }
+.image-download-button:hover { background: #111827; }
+.image-more { display: flex; align-items: center; justify-content: center; font-size: 11px; color: #9ca3af; border-radius: 6px; border: 1px dashed #4b5563; }
+.prompt-block { margin-top: 8px; font-size: 11px; line-height: 1.4; color: #e5e7eb; padding: 6px 8px; border-radius: 6px; background: #030712; border: 1px solid #1f2937; max-height: 120px; overflow: auto; }
+.flow-list { margin-top: 8px; font-size: 11px; color: #e5e7eb; padding: 8px 10px; border-radius: 8px; background: #020617; border: 1px solid #1f2937; }
+.flow-list ul { padding-left: 16px; margin: 4px 0 0; }
+.flow-list li { margin: 2px 0; }
+.json-block { margin-top: 16px; font-size: 11px; color: #e5e7eb; padding: 10px 12px; border-radius: 8px; background: #020617; border: 1px solid #1f2937; max-height: 360px; overflow: auto; }
+</style>
+</head>
+<body>
+<h1>Workflow: ${escapeHtml(workflow.name)}</h1>
+<p>Edge style: <code>${escapeHtml(edgeStyle)}</code></p>
+<div class="layout">
+  <div>
+    <h2>Nodes & Images</h2>
+    <div class="node-grid">
+      ${nodeCards}
+    </div>
+  </div>
+  <div>
+    <h2>Flow</h2>
+    <div class="flow-list">
+      <div class="section-title">Edges</div>
+      <ul>
+        ${edgeList}
+      </ul>
+    </div>
+    <h3>Raw JSON</h3>
+    <div class="json-block"><pre><code>${escapeHtml(json)}</code></pre></div>
+  </div>
+</div>
+</body>
+</html>`;
+
+    const htmlBlob = new Blob([htmlContent], { type: "text/html" });
+    const htmlUrl = URL.createObjectURL(htmlBlob);
+    window.open(htmlUrl, "_blank", "noopener,noreferrer");
   },
 
   loadWorkflow: (workflow: WorkflowFile) => {

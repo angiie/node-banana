@@ -133,7 +133,7 @@ function GenerateComboButton() {
 }
 
 export function FloatingActionBar() {
-  const { nodes, isRunning, executeWorkflow, regenerateNode, stopWorkflow, validateWorkflow, edgeStyle, setEdgeStyle, saveWorkflow, loadWorkflow } =
+  const { nodes, isRunning, executeWorkflow, regenerateNode, stopWorkflow, validateWorkflow, edgeStyle, setEdgeStyle, saveWorkflow, exportWorkflowHtml, loadWorkflow } =
     useWorkflowStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [runMenuOpen, setRunMenuOpen] = useState(false);
@@ -194,6 +194,10 @@ export function FloatingActionBar() {
     saveWorkflow();
   };
 
+  const handleExportHtml = () => {
+    exportWorkflowHtml();
+  };
+
   const handleLoadClick = () => {
     fileInputRef.current?.click();
   };
@@ -246,6 +250,16 @@ export function FloatingActionBar() {
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+          </svg>
+        </button>
+
+        <button
+          onClick={handleExportHtml}
+          title="Export workflow as HTML"
+          className="p-1.5 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-700 rounded transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4h16v4H4zM4 10h16v2H4zM4 14h10v2H4zM4 18h8v2H4z" />
           </svg>
         </button>
 
