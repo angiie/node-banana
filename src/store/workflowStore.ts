@@ -113,7 +113,7 @@ const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         inputPrompt: null,
         outputImage: null,
         aspectRatio: "1:1",
-        resolution: "1K",
+        resolution: "4K",
         model: "nano-banana-pro",
         useGoogleSearch: false,
         status: "idle",
