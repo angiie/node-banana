@@ -32,23 +32,95 @@ function calculateFanPosition(index: number, total: number) {
   return { x, y };
 }
 
+function getDataUrlMimeType(dataUrl: string): string | null {
+  const match = dataUrl.match(/^data:([^;]+);/);
+  return match?.[1] ?? null;
+}
+
+function getExtensionFromMimeType(mimeType: string | null): string {
+  if (!mimeType) return "png";
+  if (mimeType === "image/png") return "png";
+  if (mimeType === "image/jpeg") return "jpg";
+  if (mimeType === "image/webp") return "webp";
+  return "png";
+}
+
+function formatTimestampForFilename(timestamp: number): string {
+  const d = new Date(timestamp);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  const mm = pad(d.getMonth() + 1);
+  const dd = pad(d.getDate());
+  const hh = pad(d.getHours());
+  const mi = pad(d.getMinutes());
+  const ss = pad(d.getSeconds());
+  return `${yyyy}${mm}${dd}_${hh}${mi}${ss}`;
+}
+
+function sanitizeFilenamePart(input: string): string {
+  return input
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\.+$/g, "")
+    .slice(0, 40) || "image";
+}
+
+function buildDownloadFilename(item: ImageHistoryItem): string {
+  const mimeType = getDataUrlMimeType(item.image);
+  const ext = getExtensionFromMimeType(mimeType);
+  const ts = formatTimestampForFilename(item.timestamp);
+  const model = item.model === "nano-banana-pro" ? "pro" : "std";
+  const ratio = item.aspectRatio.replace(":", "x");
+  const promptPart = sanitizeFilenamePart(item.prompt || "image");
+  return `${ts}_${model}_${ratio}_${promptPart}.${ext}`;
+}
+
+async function downloadUrlToFile(url: string, filename: string) {
+  try {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(blobUrl);
+  } catch {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+}
+
 // Fan Item Component
 function FanItem({
   item,
   index,
   total,
   onDragStart,
+  onDownload,
+  isDownloading,
 }: {
   item: ImageHistoryItem;
   index: number;
   total: number;
   onDragStart: (e: React.DragEvent, item: ImageHistoryItem) => void;
+  onDownload: (item: ImageHistoryItem) => void;
+  isDownloading: boolean;
 }) {
   const { x, y } = calculateFanPosition(index, total);
   const delay = index * 30;
 
   return (
-    <button
+    <div
       draggable
       onDragStart={(e) => onDragStart(e, item)}
       className="absolute w-14 h-14 rounded-lg overflow-hidden border-2 border-neutral-600 hover:border-blue-500 shadow-lg cursor-grab active:cursor-grabbing transition-colors duration-150 animate-fan-enter group"
@@ -68,7 +140,40 @@ function FanItem({
         className="w-full h-full object-cover pointer-events-none"
         draggable={false}
       />
-    </button>
+      <button
+        type="button"
+        draggable={false}
+        disabled={isDownloading}
+        onMouseDown={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onDownload(item);
+        }}
+        className={`absolute top-1 right-1 w-5 h-5 rounded bg-neutral-900/70 text-neutral-200 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center ${
+          isDownloading ? "cursor-wait" : "hover:bg-neutral-900"
+        }`}
+        title={isDownloading ? "Downloading..." : "Download"}
+      >
+        {isDownloading ? (
+          <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+            <path
+              className="opacity-75"
+              fill="currentColor"
+              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+            />
+          </svg>
+        ) : (
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+          </svg>
+        )}
+      </button>
+    </div>
   );
 }
 
@@ -78,12 +183,16 @@ function HistorySidebar({
   onClear,
   onClose,
   onDragStart,
+  onDownload,
+  downloadingId,
   triggerRect,
 }: {
   history: ImageHistoryItem[];
   onClear: () => void;
   onClose: () => void;
   onDragStart: (e: React.DragEvent, item: ImageHistoryItem) => void;
+  onDownload: (item: ImageHistoryItem) => void;
+  downloadingId: string | null;
   triggerRect: DOMRect | null;
 }) {
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -188,6 +297,42 @@ function HistorySidebar({
                 {formatRelativeTime(item.timestamp)} · {item.model === "nano-banana-pro" ? "Pro" : "Standard"}
               </p>
             </div>
+
+            <div className="flex items-center">
+              <button
+                type="button"
+                draggable={false}
+                disabled={downloadingId === item.id}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onDownload(item);
+                }}
+                className={`w-7 h-7 rounded flex items-center justify-center text-neutral-400 opacity-0 group-hover:opacity-100 transition-opacity ${
+                  downloadingId === item.id ? "cursor-wait" : "hover:text-white hover:bg-neutral-700/70"
+                }`}
+                title={downloadingId === item.id ? "Downloading..." : "Download"}
+              >
+                {downloadingId === item.id ? (
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    />
+                  </svg>
+                ) : (
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                )}
+              </button>
+            </div>
           </div>
         ))}
       </div>
@@ -204,6 +349,7 @@ function HistorySidebar({
 export function GlobalImageHistory() {
   const [isOpen, setIsOpen] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -286,6 +432,16 @@ export function GlobalImageHistory() {
     setShowSidebar(false);
   }, [clearGlobalHistory]);
 
+  const handleDownload = useCallback(async (item: ImageHistoryItem) => {
+    const filename = buildDownloadFilename(item);
+    setDownloadingId(item.id);
+    try {
+      await downloadUrlToFile(item.image, filename);
+    } finally {
+      setDownloadingId((current) => (current === item.id ? null : current));
+    }
+  }, []);
+
   if (history.length === 0) return null;
 
   return (
@@ -334,6 +490,8 @@ export function GlobalImageHistory() {
                 index={index}
                 total={fanItems.length}
                 onDragStart={handleDragStart}
+                onDownload={handleDownload}
+                isDownloading={downloadingId === item.id}
               />
             ))}
           </div>
@@ -368,6 +526,8 @@ export function GlobalImageHistory() {
           onClear={handleClear}
           onClose={handleCloseSidebar}
           onDragStart={handleDragStart}
+          onDownload={handleDownload}
+          downloadingId={downloadingId}
           triggerRect={triggerRef.current?.getBoundingClientRect() || null}
         />
       )}
